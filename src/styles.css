@@ -30,6 +30,12 @@ h1 {
   margin: 0.25rem 0 1.5rem;
 }
 
+#dirty-dot {
+  color: #c8441b;
+  font-weight: bold;
+  margin-right: 0.25em;
+}
+
 .row {
   display: flex;
   gap: 0.5rem;

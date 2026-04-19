@@ -1,5 +1,6 @@
 const { invoke } = window.__TAURI__.core;
 const { open } = window.__TAURI__.dialog;
+const { listen } = window.__TAURI__.event;
 
 window.addEventListener("DOMContentLoaded", () => {
   const greetInput = document.querySelector("#greet-input");
@@ -16,14 +17,23 @@ window.addEventListener("DOMContentLoaded", () => {
     echoMsg.textContent = await invoke("echo", { msg: echoInput.value });
   });
 
-  const pathView = document.querySelector("#path-view");
+  const pathText = document.querySelector("#path-text");
+  const dirtyDot = document.querySelector("#dirty-dot");
   const editor = document.querySelector("#editor");
+  let localDirty = false;
 
   async function refreshPath() {
     const path = await invoke("current_path");
-    pathView.textContent = path ?? "";
+    pathText.textContent = path ?? "";
     return path;
   }
+
+  function setDirty(next) {
+    localDirty = next;
+    dirtyDot.hidden = !next;
+    return invoke("set_dirty", { dirty: next });
+  }
+
   refreshPath();
 
   document.querySelector("#open-btn").addEventListener("click", async () => {
@@ -34,22 +44,34 @@ window.addEventListener("DOMContentLoaded", () => {
     try {
       editor.value = await invoke("read_file", { path });
       await refreshPath();
+      await setDirty(false);
     } catch (err) {
-      pathView.textContent = `${path} — error: ${err}`;
+      pathText.textContent = `${path} — error: ${err}`;
     }
   });
 
   document.querySelector("#save-btn").addEventListener("click", async () => {
     const path = await invoke("current_path");
     if (path === null) {
-      pathView.textContent = "open a file first";
+      pathText.textContent = "open a file first";
       return;
     }
     try {
       await invoke("write_file", { path, contents: editor.value });
-      pathView.textContent = `${path} — saved`;
+      await setDirty(false);
+      pathText.textContent = `${path} — saved`;
     } catch (err) {
-      pathView.textContent = `${path} — error: ${err}`;
+      pathText.textContent = `${path} — error: ${err}`;
     }
+  });
+
+  editor.addEventListener("input", () => {
+    if (!localDirty) {
+      setDirty(true);
+    }
+  });
+
+  listen("fedit:close-blocked", () => {
+    pathText.textContent = "unsaved changes — save before closing";
   });
 });
