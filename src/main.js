@@ -1,10 +1,5 @@
 const { invoke } = window.__TAURI__.core;
-
-// Every OS ships a `hosts` file in a different place. Pick the right one so this
-// demo works on Windows 10/11 as well as macOS and Linux.
-const HARDCODED_PATH = /Windows/i.test(navigator.userAgent)
-  ? "C:\\Windows\\System32\\drivers\\etc\\hosts"
-  : "/etc/hosts";
+const { open } = window.__TAURI__.dialog;
 
 window.addEventListener("DOMContentLoaded", () => {
   const greetInput = document.querySelector("#greet-input");
@@ -21,10 +16,16 @@ window.addEventListener("DOMContentLoaded", () => {
     echoMsg.textContent = await invoke("echo", { msg: echoInput.value });
   });
 
+  const pathView = document.querySelector("#path-view");
   const fileView = document.querySelector("#file-view");
-  document.querySelector("#load-btn").addEventListener("click", async () => {
+  document.querySelector("#open-btn").addEventListener("click", async () => {
+    const path = await open({ multiple: false, directory: false });
+    if (path === null) {
+      return;
+    }
+    pathView.textContent = path;
     try {
-      fileView.textContent = await invoke("read_file", { path: HARDCODED_PATH });
+      fileView.textContent = await invoke("read_file", { path });
     } catch (err) {
       fileView.textContent = `error: ${err}`;
     }
