@@ -37,15 +37,22 @@ fn read_file(path: String, state: State<Mutex<AppState>>) -> Result<String, Stri
 }
 
 #[tauri::command]
-fn write_file(
-    path: String,
+fn save(
+    new_path: Option<String>,
     contents: String,
     state: State<Mutex<AppState>>,
-) -> Result<(), String> {
-    std::fs::write(&path, &contents).map_err(|e| e.to_string())?;
+) -> Result<String, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.remember(path);
-    Ok(())
+    let path = match new_path {
+        Some(p) => p,
+        None => match &s.current_path {
+            Some(p) => p.clone(),
+            None => return Err("no-path".to_string()),
+        },
+    };
+    std::fs::write(&path, &contents).map_err(|e| e.to_string())?;
+    s.remember(path.clone());
+    Ok(path)
 }
 
 #[tauri::command]
@@ -76,7 +83,7 @@ pub fn run() {
             greet,
             echo,
             read_file,
-            write_file,
+            save,
             current_path,
             set_dirty,
             is_dirty,

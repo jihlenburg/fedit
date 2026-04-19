@@ -1,5 +1,5 @@
 const { invoke } = window.__TAURI__.core;
-const { open } = window.__TAURI__.dialog;
+const { open, save: saveDialog } = window.__TAURI__.dialog;
 const { listen } = window.__TAURI__.event;
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -34,6 +34,26 @@ window.addEventListener("DOMContentLoaded", () => {
     return invoke("set_dirty", { dirty: next });
   }
 
+  async function doSave(newPath) {
+    try {
+      const saved = await invoke("save", {
+        newPath: newPath ?? null,
+        contents: editor.value,
+      });
+      await setDirty(false);
+      pathText.textContent = `${saved} — saved`;
+      return saved;
+    } catch (err) {
+      if (err === "no-path") {
+        const chosen = await saveDialog({});
+        if (chosen === null) return null;
+        return doSave(chosen);
+      }
+      pathText.textContent = `error: ${err}`;
+      return null;
+    }
+  }
+
   refreshPath();
 
   document.querySelector("#open-btn").addEventListener("click", async () => {
@@ -50,19 +70,12 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  document.querySelector("#save-btn").addEventListener("click", async () => {
-    const path = await invoke("current_path");
-    if (path === null) {
-      pathText.textContent = "open a file first";
-      return;
-    }
-    try {
-      await invoke("write_file", { path, contents: editor.value });
-      await setDirty(false);
-      pathText.textContent = `${path} — saved`;
-    } catch (err) {
-      pathText.textContent = `${path} — error: ${err}`;
-    }
+  document.querySelector("#save-btn").addEventListener("click", () => doSave(null));
+
+  document.querySelector("#save-as-btn").addEventListener("click", async () => {
+    const chosen = await saveDialog({});
+    if (chosen === null) return;
+    doSave(chosen);
   });
 
   editor.addEventListener("input", () => {
