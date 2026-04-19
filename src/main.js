@@ -18,32 +18,38 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const pathView = document.querySelector("#path-view");
   const editor = document.querySelector("#editor");
-  let currentPath = null;
+
+  async function refreshPath() {
+    const path = await invoke("current_path");
+    pathView.textContent = path ?? "";
+    return path;
+  }
+  refreshPath();
 
   document.querySelector("#open-btn").addEventListener("click", async () => {
     const path = await open({ multiple: false, directory: false });
     if (path === null) {
       return;
     }
-    currentPath = path;
-    pathView.textContent = path;
     try {
       editor.value = await invoke("read_file", { path });
+      await refreshPath();
     } catch (err) {
       pathView.textContent = `${path} — error: ${err}`;
     }
   });
 
   document.querySelector("#save-btn").addEventListener("click", async () => {
-    if (currentPath === null) {
+    const path = await invoke("current_path");
+    if (path === null) {
       pathView.textContent = "open a file first";
       return;
     }
     try {
-      await invoke("write_file", { path: currentPath, contents: editor.value });
-      pathView.textContent = `${currentPath} — saved`;
+      await invoke("write_file", { path, contents: editor.value });
+      pathView.textContent = `${path} — saved`;
     } catch (err) {
-      pathView.textContent = `${currentPath} — error: ${err}`;
+      pathView.textContent = `${path} — error: ${err}`;
     }
   });
 });
