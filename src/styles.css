@@ -70,8 +70,19 @@ button.ghost:hover {
   background: #efe3cb;
 }
 
-#greet-input {
+#greet-input,
+#echo-input {
   flex: 1;
+}
+
+#editor {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.95rem;
+  resize: vertical;
+  margin-top: 0.75rem;
+  min-height: 12em;
 }
 
 #greet-msg {

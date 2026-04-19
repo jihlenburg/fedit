@@ -17,7 +17,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   const pathView = document.querySelector("#path-view");
-  const fileView = document.querySelector("#file-view");
+  const editor = document.querySelector("#editor");
   document.querySelector("#open-btn").addEventListener("click", async () => {
     const path = await open({ multiple: false, directory: false });
     if (path === null) {
@@ -25,9 +25,9 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     pathView.textContent = path;
     try {
-      fileView.textContent = await invoke("read_file", { path });
+      editor.value = await invoke("read_file", { path });
     } catch (err) {
-      fileView.textContent = `error: ${err}`;
+      pathView.textContent = `${path} — error: ${err}`;
     }
   });
 });
