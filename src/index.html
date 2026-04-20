@@ -2,9 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="stylesheet" href="styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>fedit</title>
+
+    <!-- Preconnect to Google Fonts for faster first paint -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="stylesheet" href="styles.css" />
     <script type="module" src="/main.js" defer></script>
   </head>
 
@@ -14,24 +23,34 @@
       <p class="tagline">a tiny editor, built on Tauri 2</p>
 
       <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="your name" />
+        <input id="greet-input" placeholder="your name" autocomplete="off" />
         <button type="submit">Say hi</button>
       </form>
-      <p id="greet-msg"></p>
+      <p id="greet-msg" aria-live="polite"></p>
 
       <form class="row" id="echo-form">
-        <input id="echo-input" placeholder="say something" />
+        <input id="echo-input" placeholder="say something" autocomplete="off" />
         <button type="submit" class="ghost">Echo</button>
       </form>
-      <p id="echo-msg"></p>
+      <p id="echo-msg" aria-live="polite"></p>
 
       <div class="row">
         <button id="open-btn" class="ghost">Open a file…</button>
         <button id="save-btn" class="ghost">Save</button>
         <button id="save-as-btn" class="ghost">Save as…</button>
       </div>
-      <p id="path-view" class="tagline"><span id="dirty-dot" hidden>●</span> <span id="path-text"></span></p>
-      <textarea id="editor" rows="16" placeholder="open a file, or start typing here"></textarea>
+
+      <p class="path-line" id="path-view">
+        <span id="dirty-dot" hidden aria-label="unsaved changes">●</span>
+        <span id="path-text"></span>
+      </p>
+
+      <textarea
+        id="editor"
+        rows="16"
+        spellcheck="false"
+        placeholder="open a file, or start typing here"
+      ></textarea>
 
       <details id="recent-wrap">
         <summary>Recent files</summary>

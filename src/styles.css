@@ -1,144 +1,401 @@
+/* ============================================================================
+ * fedit — a minimal text editor on Tauri 2
+ * Single stylesheet. Section headers below map to the page regions.
+ *
+ * Design goals
+ *   • Warm editorial feel, not "dashboard-generated-by-AI"
+ *   • Works the same on Windows 10/11, macOS, and Linux (no OS-specific CSS)
+ *   • Generous spacing and a readable column width — this is a writing tool
+ *   • Dark mode follows the OS preference; no toggle inside the app
+ *
+ * Font stack chooses a web font (loaded by the tutorial) but degrades to
+ * each platform's best default: San Francisco on macOS, Segoe UI on Windows,
+ * Cantarell/Ubuntu on Linux. "system-ui" resolves to all of those.
+ * ==========================================================================*/
+
+/* ---------------------------------------------------------------------------
+ * 1. Design tokens
+ *
+ * Every colour, radius and spacing value lives here. Change a token and the
+ * whole UI moves with it. The dark-mode block at the bottom overrides only
+ * these variables — no component rule needs to know about the palette.
+ * -------------------------------------------------------------------------*/
 :root {
-  font-family: "IBM Plex Sans", system-ui, sans-serif;
-  font-size: 16px;
-  line-height: 1.55;
-  color: #2a1f1a;
-  background-color: #faf4e8;
+  /* palette — warm editorial */
+  --bg:            #faf4e8;
+  --bg-raised:    #ffffff;
+  --bg-soft:      #f3ead6;
+  --border:       #d9c8ad;
+  --border-soft:  #eadcc2;
+  --text:         #2a1f1a;
+  --text-muted:   #6b4a32;
+  --accent:       #c8441b;
+  --accent-hover: #a83913;
+  --danger:       #c8441b;
+  --focus-ring:   rgba(200, 68, 27, 0.35);
+  --shadow-sm:    0 1px 2px rgba(42, 31, 26, 0.06);
+  --shadow-md:    0 6px 16px rgba(42, 31, 26, 0.08);
+
+  /* typography */
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  --font-head: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas,
+               "Liberation Mono", ui-monospace, monospace;
+  --fs-body: 16px;
+  --fs-small: 0.88rem;
+  --fs-h1: clamp(1.9rem, 2vw + 1.2rem, 2.4rem); /* scales a bit with viewport */
+  --lh: 1.55;
+
+  /* shape */
+  --radius:    8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+
+  /* spacing — every gap in the app is a multiple of this */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  /* motion — keep animations short; editors shouldn't "feel animated" */
+  --transition: 120ms ease;
+
+  color: var(--text);
+  background-color: var(--bg);
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* ---------------------------------------------------------------------------
+ * 2. Base layout
+ *
+ * The whole app is one centred column. 640 px is about 75ch of the body font,
+ * which keeps lines readable while still feeling like a "real window." The
+ * 2 rem top padding leaves room for the OS title bar on Windows and the
+ * traffic lights on macOS.
+ * -------------------------------------------------------------------------*/
 body {
   margin: 0;
+  /* Subtle warmth behind the column — almost invisible, but fights flat greys */
+  background:
+    radial-gradient(1200px 600px at 20% -10%, #fcf1dc 0%, transparent 60%),
+    radial-gradient(900px 500px at 100% 110%, #f6e4c9 0%, transparent 55%),
+    var(--bg);
+  min-height: 100vh;
 }
 
 .container {
   max-width: 640px;
   margin: 0 auto;
-  padding: 2rem 1.25rem;
+  padding: var(--space-6) var(--space-5) var(--space-6);
 }
 
+/* ---------------------------------------------------------------------------
+ * 3. Headings
+ *
+ * Fraunces is a variable serif with optical sizing. Using --font-head as a
+ * single token makes it trivial to swap if someone hates serifs.
+ * -------------------------------------------------------------------------*/
 h1 {
-  font-family: "Fraunces", Georgia, serif;
-  font-size: 2rem;
-  margin: 0;
+  font-family: var(--font-head);
+  font-optical-sizing: auto;
+  font-weight: 600;
+  font-size: var(--fs-h1);
+  letter-spacing: -0.01em;
+  margin: 0 0 var(--space-1);
 }
 
 .tagline {
-  color: #6b4a32;
-  margin: 0.25rem 0 1.5rem;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-5);
+  font-size: var(--fs-small);
 }
 
-#dirty-dot {
-  color: #c8441b;
-  font-weight: bold;
-  margin-right: 0.25em;
-}
-
+/* ---------------------------------------------------------------------------
+ * 4. Form rows
+ *
+ * Every bar of controls uses `.row`. Flex-wrap lets the buttons drop onto a
+ * new line on narrow windows instead of overflowing.
+ * -------------------------------------------------------------------------*/
 .row {
   display: flex;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 
+/* ---------------------------------------------------------------------------
+ * 5. Inputs, textareas, buttons
+ *
+ * All three share a rounded look. Buttons come in two flavours:
+ *   • primary  — the default: filled, accent-coloured, for the main action
+ *   • .ghost   — quiet outline, for secondary actions (Open, Save As…)
+ *
+ * We set `font: inherit` so the form controls pick up the IBM Plex body font
+ * instead of the browser's default UI font — critical for a coherent look,
+ * since Windows would otherwise render them in Segoe UI regardless of body.
+ * -------------------------------------------------------------------------*/
 input,
 textarea,
 button {
   font: inherit;
   color: inherit;
-  border-radius: 6px;
-  border: 1px solid #c9b79c;
-  padding: 0.5em 0.75em;
-  background: #fff;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm);
+  padding: 0.5em 0.8em;
+  transition: border-color var(--transition),
+              background var(--transition),
+              box-shadow var(--transition);
 }
 
+/* Focus ring — works on all platforms and stays visible in dark mode.
+ * The outline is offset so it never clashes with the rounded corner. */
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+/* Primary button — filled accent */
 button {
   cursor: pointer;
-  background: #c8441b;
-  border-color: #c8441b;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
   font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }
 
 button:hover {
-  background: #a83913;
-  border-color: #a83913;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
+/* active = the millisecond the button is pressed; give a tiny "click" feel */
+button:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+/* Ghost button — same shape, quiet colours, used for Open/Save/Save-As */
 button.ghost {
   background: transparent;
-  border-color: #c9b79c;
-  color: #2a1f1a;
+  border-color: var(--border);
+  color: var(--text);
   font-weight: 500;
+  box-shadow: none;
 }
 
 button.ghost:hover {
-  background: #efe3cb;
+  background: var(--bg-soft);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
+/* Inputs in a row should grow to fill the space next to their button */
 #greet-input,
 #echo-input {
   flex: 1;
+  min-width: 10rem;
 }
 
+/* ---------------------------------------------------------------------------
+ * 6. Editor (textarea)
+ *
+ * Full-width monospace pane. The 60vh min-height keeps it feeling like the
+ * main affordance without pinning to a single number; on short laptop
+ * screens it shrinks, on big monitors it takes the space it deserves.
+ * -------------------------------------------------------------------------*/
 #editor {
   width: 100%;
   box-sizing: border-box;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 0.95rem;
+  line-height: 1.55;
   resize: vertical;
-  margin-top: 0.75rem;
-  min-height: 12em;
+  margin-top: var(--space-3);
+  min-height: 60vh;
+  padding: var(--space-4);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
 }
 
+/* ---------------------------------------------------------------------------
+ * 7. Path + dirty indicator
+ *
+ * `.path-line` lives under the buttons row. The dirty dot appears only when
+ * the buffer differs from the file on disk. We set `min-height` so the line
+ * doesn't jump up when the dot toggles visibility.
+ * -------------------------------------------------------------------------*/
+.path-line {
+  margin: var(--space-2) 0;
+  color: var(--text-muted);
+  font-size: var(--fs-small);
+  min-height: 1.4em;
+  /* wrap long absolute paths instead of overflowing the column */
+  word-break: break-all;
+}
+
+/* The dot uses `inline-block` + fixed width so it reserves space even when
+ * [hidden], which prevents reflow when you start editing.
+ * We keep the [hidden] contract so toggling in JS is a one-liner. */
+#dirty-dot {
+  color: var(--danger);
+  font-weight: bold;
+  margin-right: var(--space-1);
+}
+
+#dirty-dot[hidden] {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * 8. Message paragraphs
+ *
+ * The greet/echo demos write into <p id="greet-msg"> / <p id="echo-msg">.
+ * Reserving a line of height keeps the layout from jumping.
+ * -------------------------------------------------------------------------*/
+#greet-msg,
+#echo-msg {
+  margin: var(--space-2) 0 var(--space-4);
+  color: var(--text-muted);
+  min-height: 1.4em;
+  font-size: var(--fs-small);
+}
+
+/* ---------------------------------------------------------------------------
+ * 9. Recent files (<details> + list)
+ *
+ * Uses the native <details>/<summary> so keyboard users get expand/collapse
+ * for free. The triangle gets a subtle accent colour on hover.
+ * -------------------------------------------------------------------------*/
 #recent-wrap {
-  margin-top: 1rem;
-  color: #3f2e23;
+  margin-top: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
 }
 
 #recent-wrap summary {
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 600;
+  color: var(--text);
+}
+
+#recent-wrap[open] summary {
+  margin-bottom: var(--space-2);
 }
 
 #recent-list {
   list-style: none;
-  padding-left: 0.5rem;
-  margin: 0.5rem 0;
+  padding-left: 0;
+  margin: 0;
 }
 
 #recent-list li {
   cursor: pointer;
-  padding: 0.15rem 0;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.9rem;
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  /* paths can be long; truncate on one line with an ellipsis */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--transition), color var(--transition);
 }
 
 #recent-list li:hover {
-  color: #c8441b;
+  background: var(--bg-raised);
+  color: var(--accent);
 }
 
-#greet-msg {
-  margin-top: 0.75rem;
-  color: #3f2e23;
-  min-height: 1.4em;
+#recent-list:empty::before {
+  content: "no recent files yet — open one";
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: var(--fs-small);
 }
 
+/* ---------------------------------------------------------------------------
+ * 10. Responsiveness
+ *
+ * Below 520 px (small windows / tiny sidebar'd displays) drop some padding
+ * so nothing feels cramped. The flex-wrap on .row already handles buttons.
+ * -------------------------------------------------------------------------*/
+@media (max-width: 520px) {
+  .container {
+    padding: var(--space-4) var(--space-3);
+  }
+
+  #editor {
+    min-height: 40vh;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 11. Dark mode
+ *
+ * Redefines the palette tokens; every component rule picks it up for free.
+ * The OS toggles this via `prefers-color-scheme`; there's no in-app switch,
+ * so behaviour is the same whether the user flipped dark mode in Windows
+ * Settings → Personalization → Colors or macOS System Settings → Appearance.
+ * -------------------------------------------------------------------------*/
 @media (prefers-color-scheme: dark) {
   :root {
-    color: #f0e6d2;
-    background-color: #1c1611;
+    --bg:            #1c1611;
+    --bg-raised:    #24201a;
+    --bg-soft:      #2a2319;
+    --border:       #6b4a32;
+    --border-soft:  #3a2d1f;
+    --text:         #f0e6d2;
+    --text-muted:   #b89b76;
+    --accent:       #e06132;
+    --accent-hover: #eb7547;
+    --danger:       #e06132;
+    --focus-ring:   rgba(224, 97, 50, 0.4);
+    --shadow-sm:    0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md:    0 6px 16px rgba(0, 0, 0, 0.35);
   }
 
-  input,
-  textarea,
-  button.ghost {
-    background: #2b2217;
-    border-color: #6b4a32;
-    color: #f0e6d2;
+  body {
+    /* darker, warmer radial wash — same idea, different intensity */
+    background:
+      radial-gradient(1200px 600px at 20% -10%, #2a2017 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 110%, #241b13 0%, transparent 55%),
+      var(--bg);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * 12. Reduced motion
+ *
+ * Some users set "reduce motion" at the OS level. Respect it: zero out the
+ * button press animation so nothing moves unexpectedly.
+ * -------------------------------------------------------------------------*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
   }
 
-  button.ghost:hover {
-    background: #3a2d1f;
+  button:active {
+    transform: none;
   }
 }
