@@ -54,7 +54,30 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  const recentList = document.querySelector("#recent-list");
+  async function refreshRecent() {
+    const paths = await invoke("recent_files");
+    recentList.replaceChildren(
+      ...paths.map((p) => {
+        const li = document.createElement("li");
+        li.textContent = p;
+        li.addEventListener("click", async () => {
+          try {
+            editor.value = await invoke("read_file", { path: p });
+            await refreshPath();
+            await setDirty(false);
+            await refreshRecent();
+          } catch (err) {
+            pathText.textContent = `${p} — error: ${err?.message ?? err}`;
+          }
+        });
+        return li;
+      }),
+    );
+  }
+
   refreshPath();
+  refreshRecent();
 
   document.querySelector("#open-btn").addEventListener("click", async () => {
     const path = await open({ multiple: false, directory: false });
@@ -65,17 +88,22 @@ window.addEventListener("DOMContentLoaded", () => {
       editor.value = await invoke("read_file", { path });
       await refreshPath();
       await setDirty(false);
+      await refreshRecent();
     } catch (err) {
       pathText.textContent = `${path} — error: ${err?.message ?? err}`;
     }
   });
 
-  document.querySelector("#save-btn").addEventListener("click", () => doSave(null));
+  document.querySelector("#save-btn").addEventListener("click", async () => {
+    await doSave(null);
+    await refreshRecent();
+  });
 
   document.querySelector("#save-as-btn").addEventListener("click", async () => {
     const chosen = await saveDialog({});
     if (chosen === null) return;
-    doSave(chosen);
+    await doSave(chosen);
+    await refreshRecent();
   });
 
   editor.addEventListener("input", () => {

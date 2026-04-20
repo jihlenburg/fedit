@@ -1,11 +1,20 @@
+use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, State, WindowEvent};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
+use tauri_plugin_store::StoreExt;
 use thiserror::Error;
+
+const STORE_FILE: &str = "fedit.json";
+const STORE_KEY: &str = "fedit";
+const MAX_RECENT: usize = 10;
 
 #[derive(Debug, Error)]
 enum FeditError {
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("serde error: {0}")]
+    Serde(#[from] serde_json::Error),
     #[error("no file is open")]
     NoPath,
     #[error("state is poisoned")]
@@ -20,6 +29,7 @@ impl serde::Serialize for FeditError {
         use serde::ser::SerializeStruct;
         let kind = match self {
             FeditError::Io(_) => "Io",
+            FeditError::Serde(_) => "Serde",
             FeditError::NoPath => "NoPath",
             FeditError::Poisoned => "Poisoned",
         };
@@ -32,10 +42,17 @@ impl serde::Serialize for FeditError {
 
 type Result<T> = std::result::Result<T, FeditError>;
 
+#[derive(Default, Serialize, Deserialize)]
+struct Persisted {
+    #[serde(default)]
+    recent: Vec<PathBuf>,
+}
+
 #[derive(Default)]
 struct AppState {
     current_path: Option<String>,
     is_dirty: bool,
+    recent: Vec<PathBuf>,
 }
 
 impl AppState {
@@ -47,10 +64,40 @@ impl AppState {
         self.current_path = Some(path);
         self.is_dirty = false;
     }
+
+    fn push_recent(&mut self, path: PathBuf) {
+        self.recent.retain(|p| p != &path);
+        self.recent.insert(0, path);
+        self.recent = self.recent.iter().take(MAX_RECENT).cloned().collect();
+    }
 }
 
 fn lock<'a>(state: &'a State<Mutex<AppState>>) -> Result<std::sync::MutexGuard<'a, AppState>> {
     state.lock().map_err(|_| FeditError::Poisoned)
+}
+
+fn load_persisted(app: &AppHandle) -> Persisted {
+    let Ok(store) = app.store(STORE_FILE) else {
+        return Persisted::default();
+    };
+    match store.get(STORE_KEY) {
+        Some(val) => serde_json::from_value(val).unwrap_or_default(),
+        None => Persisted::default(),
+    }
+}
+
+fn save_persisted(app: &AppHandle, persisted: &Persisted) {
+    let Ok(store) = app.store(STORE_FILE) else {
+        return;
+    };
+    if let Ok(val) = serde_json::to_value(persisted) {
+        store.set(STORE_KEY, val);
+        let _ = store.save();
+    }
+}
+
+fn persist_recent(app: &AppHandle, recent: &[PathBuf]) {
+    save_persisted(app, &Persisted { recent: recent.to_vec() });
 }
 
 #[tauri::command]
@@ -64,10 +111,16 @@ fn echo(msg: String) -> String {
 }
 
 #[tauri::command]
-fn read_file(path: String, state: State<Mutex<AppState>>) -> Result<String> {
+fn read_file(
+    path: String,
+    state: State<Mutex<AppState>>,
+    app: AppHandle,
+) -> Result<String> {
     let contents = std::fs::read_to_string(&path)?;
     let mut s = lock(&state)?;
-    s.remember(path);
+    s.remember(path.clone());
+    s.push_recent(PathBuf::from(path));
+    persist_recent(&app, &s.recent);
     Ok(contents)
 }
 
@@ -76,6 +129,7 @@ fn save(
     new_path: Option<String>,
     contents: String,
     state: State<Mutex<AppState>>,
+    app: AppHandle,
 ) -> Result<String> {
     let mut s = lock(&state)?;
     let path = match new_path {
@@ -87,6 +141,8 @@ fn save(
     };
     std::fs::write(&path, &contents)?;
     s.remember(path.clone());
+    s.push_recent(PathBuf::from(&path));
+    persist_recent(&app, &s.recent);
     Ok(path)
 }
 
@@ -109,10 +165,17 @@ fn is_dirty(state: State<Mutex<AppState>>) -> Result<bool> {
     Ok(s.is_dirty)
 }
 
+#[tauri::command]
+fn recent_files(state: State<Mutex<AppState>>) -> Result<Vec<PathBuf>> {
+    let s = lock(&state)?;
+    Ok(s.recent.clone())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .manage(Mutex::new(AppState::default()))
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -122,8 +185,17 @@ pub fn run() {
             current_path,
             set_dirty,
             is_dirty,
+            recent_files,
         ])
         .setup(|app| {
+            let persisted = load_persisted(&app.handle().clone());
+            {
+                let state: State<Mutex<AppState>> = app.state();
+                if let Ok(mut s) = state.lock() {
+                    s.recent = persisted.recent;
+                }
+            }
+
             let window = app.get_webview_window("main").unwrap();
             let handle = app.handle().clone();
             let window_for_emit = window.clone();
