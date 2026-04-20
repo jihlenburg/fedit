@@ -1,5 +1,36 @@
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WindowEvent};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+enum FeditError {
+    #[error("i/o error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("no file is open")]
+    NoPath,
+    #[error("state is poisoned")]
+    Poisoned,
+}
+
+impl serde::Serialize for FeditError {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let kind = match self {
+            FeditError::Io(_) => "Io",
+            FeditError::NoPath => "NoPath",
+            FeditError::Poisoned => "Poisoned",
+        };
+        let mut s = serializer.serialize_struct("FeditError", 2)?;
+        s.serialize_field("kind", kind)?;
+        s.serialize_field("message", &self.to_string())?;
+        s.end()
+    }
+}
+
+type Result<T> = std::result::Result<T, FeditError>;
 
 #[derive(Default)]
 struct AppState {
@@ -18,6 +49,10 @@ impl AppState {
     }
 }
 
+fn lock<'a>(state: &'a State<Mutex<AppState>>) -> Result<std::sync::MutexGuard<'a, AppState>> {
+    state.lock().map_err(|_| FeditError::Poisoned)
+}
+
 #[tauri::command]
 fn greet(name: String) -> String {
     format!("Hi {name}, welcome to fedit!")
@@ -29,9 +64,9 @@ fn echo(msg: String) -> String {
 }
 
 #[tauri::command]
-fn read_file(path: String, state: State<Mutex<AppState>>) -> Result<String, String> {
-    let contents = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut s = state.lock().map_err(|e| e.to_string())?;
+fn read_file(path: String, state: State<Mutex<AppState>>) -> Result<String> {
+    let contents = std::fs::read_to_string(&path)?;
+    let mut s = lock(&state)?;
     s.remember(path);
     Ok(contents)
 }
@@ -41,36 +76,36 @@ fn save(
     new_path: Option<String>,
     contents: String,
     state: State<Mutex<AppState>>,
-) -> Result<String, String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
+) -> Result<String> {
+    let mut s = lock(&state)?;
     let path = match new_path {
         Some(p) => p,
         None => match &s.current_path {
             Some(p) => p.clone(),
-            None => return Err("no-path".to_string()),
+            None => return Err(FeditError::NoPath),
         },
     };
-    std::fs::write(&path, &contents).map_err(|e| e.to_string())?;
+    std::fs::write(&path, &contents)?;
     s.remember(path.clone());
     Ok(path)
 }
 
 #[tauri::command]
-fn current_path(state: State<Mutex<AppState>>) -> Result<Option<String>, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
+fn current_path(state: State<Mutex<AppState>>) -> Result<Option<String>> {
+    let s = lock(&state)?;
     Ok(s.current_path.clone())
 }
 
 #[tauri::command]
-fn set_dirty(dirty: bool, state: State<Mutex<AppState>>) -> Result<(), String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
+fn set_dirty(dirty: bool, state: State<Mutex<AppState>>) -> Result<()> {
+    let mut s = lock(&state)?;
     s.set_dirty(dirty);
     Ok(())
 }
 
 #[tauri::command]
-fn is_dirty(state: State<Mutex<AppState>>) -> Result<bool, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
+fn is_dirty(state: State<Mutex<AppState>>) -> Result<bool> {
+    let s = lock(&state)?;
     Ok(s.is_dirty)
 }
 

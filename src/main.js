@@ -44,12 +44,12 @@ window.addEventListener("DOMContentLoaded", () => {
       pathText.textContent = `${saved} — saved`;
       return saved;
     } catch (err) {
-      if (err === "no-path") {
+      if (err && err.kind === "NoPath") {
         const chosen = await saveDialog({});
         if (chosen === null) return null;
         return doSave(chosen);
       }
-      pathText.textContent = `error: ${err}`;
+      pathText.textContent = `error: ${err?.message ?? err}`;
       return null;
     }
   }
@@ -66,7 +66,7 @@ window.addEventListener("DOMContentLoaded", () => {
       await refreshPath();
       await setDirty(false);
     } catch (err) {
-      pathText.textContent = `${path} — error: ${err}`;
+      pathText.textContent = `${path} — error: ${err?.message ?? err}`;
     }
   });
 
