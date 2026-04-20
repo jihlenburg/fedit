@@ -115,4 +115,15 @@ window.addEventListener("DOMContentLoaded", () => {
   listen("fedit:close-blocked", () => {
     pathText.textContent = "unsaved changes — save before closing";
   });
+
+  async function newFile() {
+    editor.value = "";
+    pathText.textContent = "";
+    await setDirty(false);
+  }
+
+  listen("fedit:menu-new", newFile);
+  listen("fedit:menu-open", () => document.querySelector("#open-btn").click());
+  listen("fedit:menu-save", () => document.querySelector("#save-btn").click());
+  listen("fedit:menu-save-as", () => document.querySelector("#save-as-btn").click());
 });

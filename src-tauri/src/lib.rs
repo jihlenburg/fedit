@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_store::StoreExt;
 use thiserror::Error;
@@ -171,6 +172,47 @@ fn recent_files(state: State<Mutex<AppState>>) -> Result<Vec<PathBuf>> {
     Ok(s.recent.clone())
 }
 
+fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    let new_item = MenuItemBuilder::new("New")
+        .id("new")
+        .accelerator("CmdOrCtrl+N")
+        .build(app)?;
+    let open_item = MenuItemBuilder::new("Open…")
+        .id("open")
+        .accelerator("CmdOrCtrl+O")
+        .build(app)?;
+    let save_item = MenuItemBuilder::new("Save")
+        .id("save")
+        .accelerator("CmdOrCtrl+S")
+        .build(app)?;
+    let save_as_item = MenuItemBuilder::new("Save As…")
+        .id("save-as")
+        .accelerator("CmdOrCtrl+Shift+S")
+        .build(app)?;
+
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&new_item)
+        .separator()
+        .item(&open_item)
+        .item(&save_item)
+        .item(&save_as_item)
+        .separator()
+        .item(&PredefinedMenuItem::quit(app, None)?)
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .item(&PredefinedMenuItem::undo(app, None)?)
+        .item(&PredefinedMenuItem::redo(app, None)?)
+        .separator()
+        .item(&PredefinedMenuItem::cut(app, None)?)
+        .item(&PredefinedMenuItem::copy(app, None)?)
+        .item(&PredefinedMenuItem::paste(app, None)?)
+        .item(&PredefinedMenuItem::select_all(app, None)?)
+        .build()?;
+
+    MenuBuilder::new(app).item(&file_menu).item(&edit_menu).build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -195,6 +237,15 @@ pub fn run() {
                     s.recent = persisted.recent;
                 }
             }
+
+            let menu = build_menu(&app.handle().clone())?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app_handle, event| {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let id = event.id().as_ref();
+                    let _ = window.emit(&format!("fedit:menu-{id}"), ());
+                }
+            });
 
             let window = app.get_webview_window("main").unwrap();
             let handle = app.handle().clone();
