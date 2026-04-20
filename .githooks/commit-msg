@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Rejects commit messages that attribute the work to Claude/Anthropic.
+# See: feedback_no_claude_attribution.md in the user's memory directory.
+set -euo pipefail
+
+msg_file="$1"
+if [ -z "${msg_file:-}" ] || [ ! -f "$msg_file" ]; then
+  echo "commit-msg hook: no message file passed" >&2
+  exit 1
+fi
+
+patterns=(
+  'Co-Authored-By:[[:space:]]*Claude'
+  'Co-Authored-By:[[:space:]]*.*@anthropic'
+  'Generated with.*Claude'
+  'Generated with.*Anthropic'
+  'noreply@anthropic\.com'
+  '🤖[[:space:]]*Generated'
+)
+
+offenders=()
+for pat in "${patterns[@]}"; do
+  if grep -Eiq "$pat" "$msg_file"; then
+    offenders+=("$pat")
+  fi
+done
+
+if [ "${#offenders[@]}" -gt 0 ]; then
+  echo "" >&2
+  echo "✖ commit-msg hook: banned attribution detected in commit message." >&2
+  echo "  This repo must not credit Claude/Anthropic in commit history." >&2
+  echo "  Offending patterns:" >&2
+  for p in "${offenders[@]}"; do
+    echo "    - $p" >&2
+  done
+  echo "" >&2
+  echo "  Remove the attribution lines and retry. Do NOT bypass with --no-verify." >&2
+  echo "" >&2
+  exit 1
+fi
+
+exit 0
