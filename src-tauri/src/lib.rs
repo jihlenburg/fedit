@@ -16,6 +16,8 @@ enum FeditError {
     Io(#[from] std::io::Error),
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("bad regex: {0}")]
+    Regex(#[from] regex::Error),
     #[error("no file is open")]
     NoPath,
     #[error("state is poisoned")]
@@ -31,6 +33,7 @@ impl serde::Serialize for FeditError {
         let kind = match self {
             FeditError::Io(_) => "Io",
             FeditError::Serde(_) => "Serde",
+            FeditError::Regex(_) => "Regex",
             FeditError::NoPath => "NoPath",
             FeditError::Poisoned => "Poisoned",
         };
@@ -172,6 +175,71 @@ fn recent_files(state: State<Mutex<AppState>>) -> Result<Vec<PathBuf>> {
     Ok(s.recent.clone())
 }
 
+/// A single match in the buffer: start/end are BYTE offsets into `haystack`.
+/// JS converts these to a selection range via textarea.setSelectionRange.
+#[derive(Serialize)]
+struct Match {
+    start: usize,
+    end: usize,
+}
+
+/// Find every match of `needle` in `haystack`. If `use_regex` is true, `needle`
+/// is compiled as a regex; otherwise the literal bytes are searched. A `case_sensitive`
+/// flag flips `(?i)` on/off in the compiled regex.
+#[tauri::command]
+fn find_matches(
+    haystack: String,
+    needle: String,
+    use_regex: bool,
+    case_sensitive: bool,
+) -> Result<Vec<Match>> {
+    if needle.is_empty() {
+        return Ok(vec![]);
+    }
+    let pattern = if use_regex {
+        needle.clone()
+    } else {
+        regex::escape(&needle)
+    };
+    let pattern = if case_sensitive {
+        pattern
+    } else {
+        format!("(?i){pattern}")
+    };
+    let re = regex::Regex::new(&pattern)?;
+    Ok(re
+        .find_iter(&haystack)
+        .map(|m| Match { start: m.start(), end: m.end() })
+        .collect())
+}
+
+/// Replace every match of `needle` in `haystack`. Returns the new string.
+/// JS assigns it to editor.value — the textarea doesn't need to know about regex.
+#[tauri::command]
+fn replace_matches(
+    haystack: String,
+    needle: String,
+    replacement: String,
+    use_regex: bool,
+    case_sensitive: bool,
+) -> Result<String> {
+    if needle.is_empty() {
+        return Ok(haystack);
+    }
+    let pattern = if use_regex {
+        needle.clone()
+    } else {
+        regex::escape(&needle)
+    };
+    let pattern = if case_sensitive {
+        pattern
+    } else {
+        format!("(?i){pattern}")
+    };
+    let re = regex::Regex::new(&pattern)?;
+    Ok(re.replace_all(&haystack, replacement.as_str()).into_owned())
+}
+
 fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let new_item = MenuItemBuilder::new("New")
         .id("new")
@@ -228,6 +296,8 @@ pub fn run() {
             set_dirty,
             is_dirty,
             recent_files,
+            find_matches,
+            replace_matches,
         ])
         .setup(|app| {
             let persisted = load_persisted(&app.handle().clone());

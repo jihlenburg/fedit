@@ -148,4 +148,127 @@ window.addEventListener("DOMContentLoaded", () => {
   listen("fedit:menu-open", () => document.querySelector("#open-btn").click());
   listen("fedit:menu-save", () => document.querySelector("#save-btn").click());
   listen("fedit:menu-save-as", () => document.querySelector("#save-as-btn").click());
+
+  // --------------------------------------------------------------------------
+  // Find / replace bar (ch22)
+  //
+  // The Rust side owns the search — it compiles the regex and returns every
+  // match as a (start, end) byte range. JS turns those ranges into a textarea
+  // selection via setSelectionRange. Keeping the regex compile in Rust means
+  // we get one correct error message and no regex engine divergence between
+  // browsers.
+  // --------------------------------------------------------------------------
+  const findBar      = document.querySelector("#find-bar");
+  const findInput    = document.querySelector("#find-input");
+  const replaceInput = document.querySelector("#replace-input");
+  const findRegex    = document.querySelector("#find-regex");
+  const findCase     = document.querySelector("#find-case");
+  const findCount    = document.querySelector("#find-count");
+
+  let findState = { matches: [], index: -1 };
+
+  function openFindBar() {
+    findBar.hidden = false;
+    findInput.focus();
+    findInput.select();
+  }
+  function closeFindBar() {
+    findBar.hidden = true;
+    findState = { matches: [], index: -1 };
+    findCount.textContent = "";
+    editor.focus();
+  }
+
+  async function runFind() {
+    const needle = findInput.value;
+    if (needle === "") {
+      findState = { matches: [], index: -1 };
+      findCount.textContent = "";
+      return;
+    }
+    try {
+      const matches = await invoke("find_matches", {
+        haystack: editor.value,
+        needle,
+        useRegex: findRegex.checked,
+        caseSensitive: findCase.checked,
+      });
+      findState = { matches, index: matches.length ? 0 : -1 };
+      updateFindCount();
+      revealCurrentMatch();
+    } catch (err) {
+      findCount.textContent = `regex: ${err?.message ?? err}`;
+    }
+  }
+
+  function updateFindCount() {
+    const { matches, index } = findState;
+    if (matches.length === 0) {
+      findCount.textContent = "no matches";
+    } else {
+      findCount.textContent = `${index + 1} / ${matches.length}`;
+    }
+  }
+
+  function revealCurrentMatch() {
+    const { matches, index } = findState;
+    if (index < 0 || index >= matches.length) return;
+    const m = matches[index];
+    editor.focus();
+    editor.setSelectionRange(m.start, m.end);
+    // Nudge the textarea to scroll the selection into view by temporarily
+    // replacing the value with the same thing — blurring+refocusing is the
+    // widely-used trick but sets dirty; instead we use scrollTop heuristic.
+    const approxLine = editor.value.slice(0, m.start).split("\n").length;
+    const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 20;
+    editor.scrollTop = Math.max(0, approxLine * lineHeight - editor.clientHeight / 2);
+    syncGutterScroll();
+  }
+
+  function step(delta) {
+    const { matches } = findState;
+    if (matches.length === 0) return;
+    findState.index = (findState.index + delta + matches.length) % matches.length;
+    updateFindCount();
+    revealCurrentMatch();
+  }
+
+  async function replaceAll() {
+    const needle = findInput.value;
+    if (needle === "") return;
+    try {
+      const newText = await invoke("replace_matches", {
+        haystack: editor.value,
+        needle,
+        replacement: replaceInput.value,
+        useRegex: findRegex.checked,
+        caseSensitive: findCase.checked,
+      });
+      if (newText !== editor.value) {
+        editor.value = newText;
+        renderGutter();
+        await setDirty(true);
+      }
+      await runFind();
+    } catch (err) {
+      findCount.textContent = `regex: ${err?.message ?? err}`;
+    }
+  }
+
+  document.querySelector("#find-btn").addEventListener("click", openFindBar);
+  document.querySelector("#find-close-btn").addEventListener("click", closeFindBar);
+  document.querySelector("#find-next-btn").addEventListener("click", () => step(+1));
+  document.querySelector("#find-prev-btn").addEventListener("click", () => step(-1));
+  document.querySelector("#replace-all-btn").addEventListener("click", replaceAll);
+  findInput.addEventListener("input", runFind);
+  findRegex.addEventListener("change", runFind);
+  findCase.addEventListener("change", runFind);
+  findInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); step(e.shiftKey ? -1 : +1); }
+    if (e.key === "Escape") { e.preventDefault(); closeFindBar(); }
+  });
+  document.addEventListener("keydown", (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === "f") { e.preventDefault(); openFindBar(); }
+  });
 });

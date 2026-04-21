@@ -38,6 +38,20 @@
         <button id="open-btn" class="ghost">Open a file…</button>
         <button id="save-btn" class="ghost">Save</button>
         <button id="save-as-btn" class="ghost">Save as…</button>
+        <button id="find-btn" class="ghost">Find…</button>
+      </div>
+
+      <!-- Find/replace bar: hidden by default, toggled by Ctrl/Cmd+F or the Find button. -->
+      <div class="find-bar" id="find-bar" hidden aria-label="find and replace">
+        <input id="find-input" placeholder="find" autocomplete="off" />
+        <input id="replace-input" placeholder="replace with (optional)" autocomplete="off" />
+        <label class="find-opt"><input type="checkbox" id="find-regex" /> regex</label>
+        <label class="find-opt"><input type="checkbox" id="find-case" /> Aa</label>
+        <button id="find-next-btn" class="ghost" type="button">Next</button>
+        <button id="find-prev-btn" class="ghost" type="button">Prev</button>
+        <button id="replace-all-btn" class="ghost" type="button">Replace all</button>
+        <button id="find-close-btn" class="ghost" type="button" aria-label="close find">✕</button>
+        <span id="find-count" class="find-count"></span>
       </div>
 
       <p class="path-line" id="path-view">
