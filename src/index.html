@@ -77,6 +77,25 @@
         <summary>Recent files</summary>
         <ul id="recent-list"></ul>
       </details>
+
+      <!-- Settings panel (ch24). Values come from get_settings on boot and
+           persist through set_settings; the Rust side emits
+           fedit:settings-changed for hot-apply. -->
+      <details id="settings-wrap">
+        <summary>Settings</summary>
+        <div class="settings-panel">
+          <label>
+            Font size
+            <input type="number" id="set-font-size" min="10" max="32" step="1" />
+            <span class="hint">px — editor only</span>
+          </label>
+          <label>
+            Tab width
+            <input type="number" id="set-tab-width" min="1" max="8" step="1" />
+            <span class="hint">spaces per Tab key</span>
+          </label>
+        </div>
+      </details>
     </main>
   </body>
 </html>

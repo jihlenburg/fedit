@@ -53,6 +53,28 @@ type Result<T> = std::result::Result<T, FeditError>;
 struct Persisted {
     #[serde(default)]
     recent: Vec<PathBuf>,
+    #[serde(default)]
+    settings: Settings,
+}
+
+/// User-tunable knobs. Every field is `#[serde(default)]` so a store file
+/// written by an older fedit (without some field) still loads — the missing
+/// keys get each field's `Default`. Adding a new field here is non-breaking.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct Settings {
+    #[serde(default = "default_font_size")]
+    font_size: u32,
+    #[serde(default = "default_tab_width")]
+    tab_width: u32,
+}
+
+fn default_font_size() -> u32 { 15 }
+fn default_tab_width() -> u32 { 4 }
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { font_size: default_font_size(), tab_width: default_tab_width() }
+    }
 }
 
 /// One open document. `path: None` means an untitled buffer that hasn't been
@@ -72,6 +94,7 @@ struct AppState {
     active: Option<usize>,
     next_id: u64,
     recent: Vec<PathBuf>,
+    settings: Settings,
     /// When true, the close-window handler stops guarding on dirty tabs —
     /// set by the frontend after the user confirms the "discard unsaved?"
     /// dialog, then cleared after the window closes.
@@ -123,8 +146,11 @@ fn save_persisted(app: &AppHandle, persisted: &Persisted) {
     }
 }
 
-fn persist_recent(app: &AppHandle, recent: &[PathBuf]) {
-    save_persisted(app, &Persisted { recent: recent.to_vec() });
+fn persist_recent(app: &AppHandle, state: &AppState) {
+    save_persisted(app, &Persisted {
+        recent: state.recent.clone(),
+        settings: state.settings.clone(),
+    });
 }
 
 #[tauri::command]
@@ -175,7 +201,7 @@ fn open_tab(
         s.active = Some(idx);
         let tab = s.tabs[idx].clone();
         s.push_recent(PathBuf::from(&path));
-        persist_recent(&app, &s.recent);
+        persist_recent(&app, &s);
         return Ok(OpenedTab { tab, contents, already_open: true });
     }
     let id = s.bump_id();
@@ -183,7 +209,7 @@ fn open_tab(
     s.tabs.push(tab.clone());
     s.active = Some(s.tabs.len() - 1);
     s.push_recent(PathBuf::from(path));
-    persist_recent(&app, &s.recent);
+    persist_recent(&app, &s);
     Ok(OpenedTab { tab, contents, already_open: false })
 }
 
@@ -294,7 +320,7 @@ fn save(
     s.tabs[idx].path = Some(path.clone());
     s.tabs[idx].dirty = false;
     s.push_recent(PathBuf::from(&path));
-    persist_recent(&app, &s.recent);
+    persist_recent(&app, &s);
     Ok(path)
 }
 
@@ -302,6 +328,29 @@ fn save(
 fn recent_files(state: State<Mutex<AppState>>) -> Result<Vec<PathBuf>> {
     let s = lock(&state)?;
     Ok(s.recent.clone())
+}
+
+#[tauri::command]
+fn get_settings(state: State<Mutex<AppState>>) -> Result<Settings> {
+    Ok(lock(&state)?.settings.clone())
+}
+
+/// Store a new `Settings`, persist to the plugin-store, and emit
+/// `fedit:settings-changed` so any open window can hot-apply the new values
+/// without a restart.
+#[tauri::command]
+fn set_settings(
+    settings: Settings,
+    state: State<Mutex<AppState>>,
+    app: AppHandle,
+) -> Result<Settings> {
+    {
+        let mut s = lock(&state)?;
+        s.settings = settings.clone();
+        persist_recent(&app, &s);
+    }
+    let _ = app.emit("fedit:settings-changed", &settings);
+    Ok(settings)
 }
 
 /// A single match in the buffer: start/end are BYTE offsets into `haystack`.
@@ -436,6 +485,8 @@ pub fn run() {
             force_close_window,
             save,
             recent_files,
+            get_settings,
+            set_settings,
             find_matches,
             replace_matches,
         ])
@@ -445,6 +496,7 @@ pub fn run() {
                 let state: State<Mutex<AppState>> = app.state();
                 if let Ok(mut s) = state.lock() {
                     s.recent = persisted.recent;
+                    s.settings = persisted.settings;
                 }
             }
 

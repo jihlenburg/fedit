@@ -63,6 +63,10 @@
   /* motion — keep animations short; editors shouldn't "feel animated" */
   --transition: 120ms ease;
 
+  /* editor tunables (ch24) — JS overwrites these on settings change */
+  --editor-font-size: 15px;
+  --editor-tab-size: 4;
+
   color: var(--text);
   background-color: var(--bg);
   font-family: var(--font-body);
@@ -248,7 +252,7 @@ button.ghost:hover {
 .gutter {
   box-sizing: border-box;
   font-family: var(--font-mono);
-  font-size: 0.95rem;
+  font-size: var(--editor-font-size);
   line-height: 1.55;
   padding: var(--space-4) var(--space-3);
   min-width: 2.8rem;
@@ -266,8 +270,10 @@ button.ghost:hover {
   flex: 1;
   box-sizing: border-box;
   font-family: var(--font-mono);
-  font-size: 0.95rem;
+  font-size: var(--editor-font-size);
   line-height: 1.55;
+  tab-size: var(--editor-tab-size);
+  -moz-tab-size: var(--editor-tab-size);
   resize: vertical;
   padding: var(--space-4);
   border: none;
@@ -529,6 +535,60 @@ button.ghost:hover {
   color: var(--text-muted);
   font-style: italic;
   font-size: var(--fs-small);
+}
+
+/* ---------------------------------------------------------------------------
+ * 9b. Settings panel (ch24)
+ *
+ * Reuses the native <details> pattern for keyboard-accessible collapse.
+ * Inputs are narrow number steppers — the settings themselves are boring
+ * ints and the visual weight should stay close to zero.
+ * -------------------------------------------------------------------------*/
+#settings-wrap {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+#settings-wrap summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+
+#settings-wrap[open] summary { margin-bottom: var(--space-2); }
+
+.settings-panel {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-panel label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-small);
+  color: var(--text);
+}
+
+.settings-panel input[type="number"] {
+  width: 5rem;
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.settings-panel .hint {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-style: italic;
 }
 
 /* ---------------------------------------------------------------------------

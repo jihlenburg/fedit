@@ -416,4 +416,70 @@ window.addEventListener("DOMContentLoaded", () => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key === "f") { e.preventDefault(); openFindBar(); }
   });
+
+  // --------------------------------------------------------------------------
+  // Settings panel (ch24)
+  //
+  // The Rust side owns the canonical Settings struct (font size, tab width)
+  // and persists it via plugin-store. On boot we pull the current values,
+  // paint them into the inputs, and apply them as CSS custom properties so
+  // the editor honours them immediately. When the user edits an input we
+  // debounce-save; whenever anyone saves (including a second window), Rust
+  // emits `fedit:settings-changed` and we hot-apply without a reload.
+  // --------------------------------------------------------------------------
+  const fontSizeInput = document.querySelector("#set-font-size");
+  const tabWidthInput = document.querySelector("#set-tab-width");
+
+  function applySettings(s) {
+    document.documentElement.style.setProperty("--editor-font-size", `${s.font_size}px`);
+    document.documentElement.style.setProperty("--editor-tab-size", String(s.tab_width));
+  }
+
+  function hydrateInputs(s) {
+    fontSizeInput.value = String(s.font_size);
+    tabWidthInput.value = String(s.tab_width);
+  }
+
+  let settingsDebounce = null;
+  function scheduleSaveSettings() {
+    clearTimeout(settingsDebounce);
+    settingsDebounce = setTimeout(async () => {
+      const font_size = clampInt(fontSizeInput, 10, 32, 15);
+      const tab_width = clampInt(tabWidthInput,  1,  8,  4);
+      try {
+        await invoke("set_settings", { settings: { font_size, tab_width } });
+      } catch (err) {
+        console.error("set_settings failed:", err);
+      }
+    }, 200);
+  }
+
+  function clampInt(input, min, max, fallback) {
+    const n = parseInt(input.value, 10);
+    if (Number.isNaN(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  (async () => {
+    try {
+      const s = await invoke("get_settings");
+      hydrateInputs(s);
+      applySettings(s);
+    } catch (err) {
+      console.error("get_settings failed:", err);
+    }
+  })();
+
+  fontSizeInput.addEventListener("input", scheduleSaveSettings);
+  tabWidthInput.addEventListener("input", scheduleSaveSettings);
+
+  listen("fedit:settings-changed", (evt) => {
+    const s = evt.payload;
+    if (!s) return;
+    applySettings(s);
+    // Refresh inputs too, so a change made in another window (or the OS
+    // reload restore) shows up without the current window feeling stale.
+    if (document.activeElement !== fontSizeInput) fontSizeInput.value = String(s.font_size);
+    if (document.activeElement !== tabWidthInput) tabWidthInput.value = String(s.tab_width);
+  });
 });
