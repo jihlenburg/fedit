@@ -45,12 +45,15 @@
         <span id="path-text"></span>
       </p>
 
-      <textarea
-        id="editor"
-        rows="16"
-        spellcheck="false"
-        placeholder="open a file, or start typing here"
-      ></textarea>
+      <div class="editor-wrap">
+        <div class="gutter" id="gutter" aria-hidden="true"></div>
+        <textarea
+          id="editor"
+          rows="16"
+          spellcheck="false"
+          placeholder="open a file, or start typing here"
+        ></textarea>
+      </div>
 
       <details id="recent-wrap">
         <summary>Recent files</summary>

@@ -20,7 +20,23 @@ window.addEventListener("DOMContentLoaded", () => {
   const pathText = document.querySelector("#path-text");
   const dirtyDot = document.querySelector("#dirty-dot");
   const editor = document.querySelector("#editor");
+  const gutter = document.querySelector("#gutter");
   let localDirty = false;
+
+  // Render line numbers into the gutter, one per line in the textarea.
+  // `split("\n").length` is how many lines exist — even an empty buffer is "1".
+  function renderGutter() {
+    const lineCount = editor.value.length === 0 ? 1 : editor.value.split("\n").length;
+    const nums = new Array(lineCount);
+    for (let i = 0; i < lineCount; i++) nums[i] = i + 1;
+    gutter.textContent = nums.join("\n");
+  }
+
+  // Keep the gutter's scroll pinned to the textarea's scroll position.
+  // overflow:hidden on .gutter means it never shows a scrollbar — we drive it.
+  function syncGutterScroll() {
+    gutter.scrollTop = editor.scrollTop;
+  }
 
   async function refreshPath() {
     const path = await invoke("current_path");
@@ -64,6 +80,7 @@ window.addEventListener("DOMContentLoaded", () => {
         li.addEventListener("click", async () => {
           try {
             editor.value = await invoke("read_file", { path: p });
+            renderGutter();
             await refreshPath();
             await setDirty(false);
             await refreshRecent();
@@ -78,6 +95,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   refreshPath();
   refreshRecent();
+  renderGutter();
 
   document.querySelector("#open-btn").addEventListener("click", async () => {
     const path = await open({ multiple: false, directory: false });
@@ -86,6 +104,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
     try {
       editor.value = await invoke("read_file", { path });
+      renderGutter();
       await refreshPath();
       await setDirty(false);
       await refreshRecent();
@@ -110,7 +129,9 @@ window.addEventListener("DOMContentLoaded", () => {
     if (!localDirty) {
       setDirty(true);
     }
+    renderGutter();
   });
+  editor.addEventListener("scroll", syncGutterScroll);
 
   listen("fedit:close-blocked", () => {
     pathText.textContent = "unsaved changes — save before closing";
@@ -119,6 +140,7 @@ window.addEventListener("DOMContentLoaded", () => {
   async function newFile() {
     editor.value = "";
     pathText.textContent = "";
+    renderGutter();
     await setDirty(false);
   }
 

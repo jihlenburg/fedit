@@ -77,10 +77,16 @@
 /* ---------------------------------------------------------------------------
  * 2. Base layout
  *
- * The whole app is one centred column. 640 px is about 75ch of the body font,
- * which keeps lines readable while still feeling like a "real window." The
- * 2 rem top padding leaves room for the OS title bar on Windows and the
- * traffic lights on macOS.
+ * The app grows with the window. On narrow laptop screens it fills edge-to-
+ * edge; on wide monitors it caps at a generous 1400 px so absurdly long lines
+ * don't read like stretched receipts. The 2 rem top padding leaves room for
+ * the OS title bar on Windows and the traffic lights on macOS.
+ *
+ * Text-width ergonomics were the original reason for a 640 px cap (≈ 75ch of
+ * body font). For an editor that's wrong — users want long lines visible, not
+ * reflowed or hidden. So we keep the short prose (tagline, messages) inside
+ * a narrower column via `max-width` on those elements, and let the editor
+ * pane consume the whole container.
  * -------------------------------------------------------------------------*/
 body {
   margin: 0;
@@ -93,9 +99,11 @@ body {
 }
 
 .container {
-  max-width: 640px;
+  /* grow with the window, cap at a comfortable reading width on big monitors */
+  max-width: min(1400px, 100%);
   margin: 0 auto;
   padding: var(--space-6) var(--space-5) var(--space-6);
+  box-sizing: border-box;
 }
 
 /* ---------------------------------------------------------------------------
@@ -123,13 +131,16 @@ h1 {
  * 4. Form rows
  *
  * Every bar of controls uses `.row`. Flex-wrap lets the buttons drop onto a
- * new line on narrow windows instead of overflowing.
+ * new line on narrow windows instead of overflowing. Cap at a comfortable
+ * reading width so the demo inputs (greet, echo) don't stretch across a
+ * 1400-px window; the editor pane is the only surface that truly fills.
  * -------------------------------------------------------------------------*/
 .row {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+  max-width: 640px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -212,24 +223,70 @@ button.ghost:hover {
 }
 
 /* ---------------------------------------------------------------------------
- * 6. Editor (textarea)
+ * 6. Editor (textarea + gutter)
  *
- * Full-width monospace pane. The 60vh min-height keeps it feeling like the
- * main affordance without pinning to a single number; on short laptop
- * screens it shrinks, on big monitors it takes the space it deserves.
+ * The editor is now a flex row: a narrow `.gutter` on the left renders line
+ * numbers in sync with the textarea, and the textarea itself takes the
+ * remaining space. The wrap element owns the rounded corners and shadow so
+ * the inner two panes read as one unit.
+ *
+ * Keeping font-size, line-height and vertical padding identical on both
+ * panes is critical — any drift makes the line numbers walk off the lines
+ * they're supposed to label. The gutter's scroll is driven from JS (see
+ * main.js); CSS just hides the scrollbar via overflow:hidden.
  * -------------------------------------------------------------------------*/
+.editor-wrap {
+  display: flex;
+  margin-top: var(--space-3);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  background: var(--bg-raised);
+  overflow: hidden;
+  min-height: 60vh;
+}
+
+.gutter {
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  padding: var(--space-4) var(--space-3);
+  min-width: 2.8rem;
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  text-align: right;
+  user-select: none;
+  overflow: hidden;
+  white-space: pre;
+  border-right: 1px solid var(--border-soft);
+  /* Gutter content starts with "1\n2\n3…" — match textarea's line box exactly */
+}
+
 #editor {
-  width: 100%;
+  flex: 1;
   box-sizing: border-box;
   font-family: var(--font-mono);
   font-size: 0.95rem;
   line-height: 1.55;
   resize: vertical;
-  margin-top: var(--space-3);
-  min-height: 60vh;
   padding: var(--space-4);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  /* remove the default textarea focus outline on the inner pane — the wrap
+   * shows it instead (see .editor-wrap:focus-within below) */
+}
+
+#editor:focus-visible {
+  outline: none;
+  border-color: transparent;
+}
+
+.editor-wrap:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--accent);
 }
 
 /* ---------------------------------------------------------------------------
@@ -265,15 +322,24 @@ button.ghost:hover {
  * 8. Message paragraphs
  *
  * The greet/echo demos write into <p id="greet-msg"> / <p id="echo-msg">.
- * Reserving a line of height keeps the layout from jumping.
+ * Reserving a line of height keeps the layout from jumping. Capped to the
+ * same reading width as the form rows so demo chrome stays tidy on wide
+ * monitors.
  * -------------------------------------------------------------------------*/
 #greet-msg,
-#echo-msg {
+#echo-msg,
+.path-line,
+.tagline {
   margin: var(--space-2) 0 var(--space-4);
   color: var(--text-muted);
   min-height: 1.4em;
   font-size: var(--fs-small);
+  max-width: 640px;
 }
+
+/* .tagline already sets its own margin; restore it */
+.tagline { margin: 0 0 var(--space-5); }
+.path-line { margin: var(--space-2) 0; }
 
 /* ---------------------------------------------------------------------------
  * 9. Recent files (<details> + list)
