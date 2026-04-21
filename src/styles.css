@@ -642,6 +642,92 @@ button.ghost:hover {
 }
 
 /* ---------------------------------------------------------------------------
+ * 11b. Command palette (ch25)
+ *
+ * A centered modal overlay. The backdrop dims the app; the palette itself is
+ * a narrow column with an input on top, a result list in the middle, and a
+ * hint row on the bottom. Every result row carries a `.shortcut` chip on the
+ * right. Arrow keys move `aria-selected`, Enter dispatches.
+ * -------------------------------------------------------------------------*/
+.palette {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 16, 14, 0.42);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: clamp(60px, 12vh, 140px);
+  z-index: 100;
+}
+.palette[hidden] { display: none; }
+
+.palette-box {
+  width: min(560px, 90vw);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px -16px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.palette-box input {
+  font-family: inherit;
+  font-size: 15px;
+  padding: 0.85rem 1rem;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  outline: none;
+}
+.palette-box ul {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 0;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.palette-box li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+.palette-box li[aria-selected="true"] {
+  background: var(--bg-soft);
+  color: var(--accent);
+}
+.palette-box li .cat {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  min-width: 4rem;
+}
+.palette-box li .shortcut {
+  margin-left: auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.palette-box li.empty {
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: default;
+}
+.palette-hint {
+  border-top: 1px solid var(--border);
+  padding: 0.4rem 1rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* ---------------------------------------------------------------------------
  * 12. Reduced motion
  *
  * Some users set "reduce motion" at the OS level. Respect it: zero out the

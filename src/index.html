@@ -97,5 +97,21 @@
         </div>
       </details>
     </main>
+
+    <!-- Command palette (ch25). Hidden by default; toggled by Ctrl/Cmd+Shift+P
+         or the View → Command Palette menu item. -->
+    <div id="palette" class="palette" hidden role="dialog" aria-label="Command palette">
+      <div class="palette-box">
+        <input
+          id="palette-input"
+          type="text"
+          placeholder="Type a command…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <ul id="palette-list" role="listbox"></ul>
+        <div class="palette-hint">↑↓ to navigate · ⏎ to run · Esc to close</div>
+      </div>
+    </div>
   </body>
 </html>

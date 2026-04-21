@@ -482,4 +482,147 @@ window.addEventListener("DOMContentLoaded", () => {
     if (document.activeElement !== fontSizeInput) fontSizeInput.value = String(s.font_size);
     if (document.activeElement !== tabWidthInput) tabWidthInput.value = String(s.tab_width);
   });
+
+  // --------------------------------------------------------------------------
+  // Command palette (ch25)
+  //
+  // Rust owns the bilingual command catalog and the fuzzy ranker. JS owns the
+  // dispatcher (what each id actually *does*) and the palette UI.
+  // --------------------------------------------------------------------------
+  const palette      = document.querySelector("#palette");
+  const paletteInput = document.querySelector("#palette-input");
+  const paletteList  = document.querySelector("#palette-list");
+
+  let paletteResults = [];
+  let paletteIndex   = 0;
+
+  const dispatch = {
+    "new-tab":   () => createNewTab(),
+    "open":      () => document.querySelector("#open-btn").click(),
+    "save":      () => document.querySelector("#save-btn").click(),
+    "save-as":   () => document.querySelector("#save-as-btn").click(),
+    "close-tab": async () => {
+      if (activeId === null) return;
+      const tabs = await invoke("list_tabs");
+      const t = tabs.find((t) => t.id === activeId);
+      if (t) closeTab(t.id, t.dirty);
+    },
+    "find":      () => openFindBar(),
+    "settings":  () => {
+      const wrap = document.querySelector("#settings-wrap");
+      if (wrap) { wrap.open = true; wrap.scrollIntoView({ behavior: "smooth" }); }
+    },
+    "recent":    () => {
+      const wrap = document.querySelector("#recent-wrap");
+      if (wrap) { wrap.open = true; wrap.scrollIntoView({ behavior: "smooth" }); }
+    },
+  };
+
+  function langIsTr() {
+    return document.documentElement.getAttribute("data-lang") === "tr";
+  }
+
+  function renderPalette() {
+    paletteList.replaceChildren();
+    if (paletteResults.length === 0) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = langIsTr() ? "eşleşme yok" : "no matches";
+      paletteList.appendChild(li);
+      return;
+    }
+    paletteResults.forEach(([cmd, _score], i) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", i === paletteIndex ? "true" : "false");
+      li.dataset.id = cmd.id;
+
+      const cat = document.createElement("span");
+      cat.className = "cat";
+      cat.textContent = cmd.category;
+      li.appendChild(cat);
+
+      const title = document.createElement("span");
+      title.className = "title";
+      title.textContent = langIsTr() ? cmd.title_tr : cmd.title;
+      li.appendChild(title);
+
+      if (cmd.shortcut) {
+        const sc = document.createElement("span");
+        sc.className = "shortcut";
+        sc.textContent = cmd.shortcut;
+        li.appendChild(sc);
+      }
+
+      li.addEventListener("click", () => runCommand(cmd.id));
+      paletteList.appendChild(li);
+    });
+    // Keep the selected row in view when using arrow keys.
+    const sel = paletteList.querySelector('[aria-selected="true"]');
+    if (sel) sel.scrollIntoView({ block: "nearest" });
+  }
+
+  async function refreshPalette() {
+    try {
+      paletteResults = await invoke("fuzzy_commands", { query: paletteInput.value });
+      paletteIndex = 0;
+      renderPalette();
+    } catch (err) {
+      console.error("fuzzy_commands failed:", err);
+    }
+  }
+
+  function openPalette() {
+    palette.hidden = false;
+    paletteInput.value = "";
+    refreshPalette();
+    paletteInput.focus();
+  }
+  function closePalette() {
+    palette.hidden = true;
+    editor.focus();
+  }
+
+  function movePaletteIndex(delta) {
+    if (paletteResults.length === 0) return;
+    paletteIndex = (paletteIndex + delta + paletteResults.length) % paletteResults.length;
+    renderPalette();
+  }
+
+  async function runCommand(id) {
+    closePalette();
+    const fn = dispatch[id];
+    if (typeof fn === "function") {
+      await fn();
+    } else {
+      console.warn("no dispatcher for command:", id);
+    }
+  }
+
+  paletteInput.addEventListener("input", refreshPalette);
+  paletteInput.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); movePaletteIndex(+1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); movePaletteIndex(-1); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (paletteResults.length === 0) return;
+      const [cmd] = paletteResults[paletteIndex];
+      runCommand(cmd.id);
+    } else if (e.key === "Escape") { e.preventDefault(); closePalette(); }
+  });
+  // Click outside the palette-box closes it.
+  palette.addEventListener("click", (e) => {
+    if (e.target === palette) closePalette();
+  });
+
+  // Global keyboard binding: Ctrl/Cmd+Shift+P.
+  document.addEventListener("keydown", (e) => {
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.shiftKey && (e.key === "P" || e.key === "p")) {
+      e.preventDefault();
+      openPalette();
+    }
+  });
+  // Native-menu entry emits "fedit:menu-palette".
+  listen("fedit:menu-palette", () => openPalette());
 });

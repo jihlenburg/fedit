@@ -353,6 +353,93 @@ fn set_settings(
     Ok(settings)
 }
 
+/// One entry in the command palette catalog. `id` is what the frontend
+/// dispatcher keys on to execute the command; `title`/`title_tr` are
+/// display-only, bilingual. `shortcut` is a display hint — the actual key
+/// binding still lives in the menu or JS keymap.
+#[derive(Clone, Serialize, Deserialize)]
+struct Command {
+    id: String,
+    title: String,
+    title_tr: String,
+    category: String,
+    shortcut: Option<String>,
+}
+
+fn commands_catalog() -> Vec<Command> {
+    fn c(id: &str, title: &str, title_tr: &str, category: &str, shortcut: Option<&str>) -> Command {
+        Command {
+            id: id.into(),
+            title: title.into(),
+            title_tr: title_tr.into(),
+            category: category.into(),
+            shortcut: shortcut.map(str::to_string),
+        }
+    }
+    vec![
+        c("new-tab",   "New tab",       "Yeni sekme",       "File",   Some("⌘N")),
+        c("open",      "Open file…",    "Dosya aç…",        "File",   Some("⌘O")),
+        c("save",      "Save",          "Kaydet",           "File",   Some("⌘S")),
+        c("save-as",   "Save as…",      "Farklı kaydet…",   "File",   Some("⇧⌘S")),
+        c("close-tab", "Close tab",     "Sekmeyi kapat",    "File",   Some("⌘W")),
+        c("find",      "Find / replace","Bul / değiştir",   "Edit",   Some("⌘F")),
+        c("settings",  "Open settings", "Ayarları aç",      "View",   None),
+        c("recent",    "Open recent files", "Son dosyaları aç", "File", None),
+    ]
+}
+
+/// Return the full command catalog. The frontend caches it on boot — no need
+/// to re-fetch per palette open since the catalog is static for the session.
+#[tauri::command]
+fn list_commands() -> Vec<Command> {
+    commands_catalog()
+}
+
+/// Score `haystack` against `needle` with a simple Sublime-style fuzzy match:
+/// every character of `needle` must appear in `haystack` in order, and
+/// consecutive hits score higher (streak bonus). Returns `None` when any needle
+/// char can't be consumed in order — that's the "no match" signal. Case is
+/// folded by the caller before passing values in.
+fn fuzzy_score(haystack: &str, needle: &str) -> Option<i32> {
+    let mut h = haystack.chars();
+    let mut score = 0;
+    let mut streak = 0;
+    for nc in needle.chars() {
+        loop {
+            let hc = h.next()?;
+            if hc == nc {
+                streak += 1;
+                score += 1 + streak;
+                break;
+            } else {
+                streak = 0;
+            }
+        }
+    }
+    Some(score)
+}
+
+/// Rank every command in the catalog against `query`. Empty queries get the
+/// catalog in stable order with score 0 so the palette has something to show
+/// on first open.
+#[tauri::command]
+fn fuzzy_commands(query: String) -> Vec<(Command, i32)> {
+    let items = commands_catalog();
+    if query.trim().is_empty() {
+        return items.into_iter().map(|c| (c, 0)).collect();
+    }
+    let q = query.to_lowercase();
+    let mut scored: Vec<(Command, i32)> = items
+        .into_iter()
+        .filter_map(|c| {
+            let haystack = format!("{} {} {} {}", c.title, c.title_tr, c.id, c.category).to_lowercase();
+            fuzzy_score(&haystack, &q).map(|s| (c, s))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored
+}
+
 /// A single match in the buffer: start/end are BYTE offsets into `haystack`.
 /// JS converts these to a selection range via textarea.setSelectionRange.
 #[derive(Serialize)]
@@ -439,6 +526,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .id("close-tab")
         .accelerator("CmdOrCtrl+W")
         .build(app)?;
+    let palette_item = MenuItemBuilder::new("Command Palette…")
+        .id("palette")
+        .accelerator("CmdOrCtrl+Shift+P")
+        .build(app)?;
 
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_item)
@@ -462,7 +553,15 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .item(&PredefinedMenuItem::select_all(app, None)?)
         .build()?;
 
-    MenuBuilder::new(app).item(&file_menu).item(&edit_menu).build()
+    let view_menu = SubmenuBuilder::new(app, "View")
+        .item(&palette_item)
+        .build()?;
+
+    MenuBuilder::new(app)
+        .item(&file_menu)
+        .item(&edit_menu)
+        .item(&view_menu)
+        .build()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -489,6 +588,8 @@ pub fn run() {
             set_settings,
             find_matches,
             replace_matches,
+            list_commands,
+            fuzzy_commands,
         ])
         .setup(|app| {
             let persisted = load_persisted(&app.handle().clone());
