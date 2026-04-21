@@ -20,6 +20,8 @@ enum FeditError {
     Regex(#[from] regex::Error),
     #[error("no file is open")]
     NoPath,
+    #[error("no such tab")]
+    NoTab,
     #[error("state is poisoned")]
     Poisoned,
 }
@@ -35,6 +37,7 @@ impl serde::Serialize for FeditError {
             FeditError::Serde(_) => "Serde",
             FeditError::Regex(_) => "Regex",
             FeditError::NoPath => "NoPath",
+            FeditError::NoTab => "NoTab",
             FeditError::Poisoned => "Poisoned",
         };
         let mut s = serializer.serialize_struct("FeditError", 2)?;
@@ -52,27 +55,47 @@ struct Persisted {
     recent: Vec<PathBuf>,
 }
 
+/// One open document. `path: None` means an untitled buffer that hasn't been
+/// saved yet — the "new tab" state. `dirty` is the editor's unsaved-changes
+/// flag, mirrored from the frontend on every keystroke.
+#[derive(Clone, Serialize)]
+struct Tab {
+    id: u64,
+    path: Option<String>,
+    dirty: bool,
+}
+
 #[derive(Default)]
 struct AppState {
-    current_path: Option<String>,
-    is_dirty: bool,
+    tabs: Vec<Tab>,
+    /// Index into `tabs`. `None` only when `tabs` is empty.
+    active: Option<usize>,
+    next_id: u64,
     recent: Vec<PathBuf>,
+    /// When true, the close-window handler stops guarding on dirty tabs —
+    /// set by the frontend after the user confirms the "discard unsaved?"
+    /// dialog, then cleared after the window closes.
+    force_close: bool,
 }
 
 impl AppState {
-    fn set_dirty(&mut self, dirty: bool) {
-        self.is_dirty = dirty;
-    }
-
-    fn remember(&mut self, path: String) {
-        self.current_path = Some(path);
-        self.is_dirty = false;
+    fn bump_id(&mut self) -> u64 {
+        self.next_id += 1;
+        self.next_id
     }
 
     fn push_recent(&mut self, path: PathBuf) {
         self.recent.retain(|p| p != &path);
         self.recent.insert(0, path);
         self.recent = self.recent.iter().take(MAX_RECENT).cloned().collect();
+    }
+
+    fn find_index(&self, id: u64) -> Option<usize> {
+        self.tabs.iter().position(|t| t.id == id)
+    }
+
+    fn find_path_index(&self, path: &str) -> Option<usize> {
+        self.tabs.iter().position(|t| t.path.as_deref() == Some(path))
     }
 }
 
@@ -114,59 +137,165 @@ fn echo(msg: String) -> String {
     format!("you said: {msg}")
 }
 
+/// Create a new untitled tab and make it active. Returns the new tab so the
+/// frontend can track its id.
 #[tauri::command]
-fn read_file(
+fn new_tab(state: State<Mutex<AppState>>) -> Result<Tab> {
+    let mut s = lock(&state)?;
+    let id = s.bump_id();
+    let tab = Tab { id, path: None, dirty: false };
+    s.tabs.push(tab.clone());
+    s.active = Some(s.tabs.len() - 1);
+    Ok(tab)
+}
+
+/// The payload returned by `open_tab`: backend tab metadata + file contents.
+/// `already_open` tells the frontend whether we created a new tab or switched
+/// to an existing one — so it knows whether to reuse the cached buffer.
+#[derive(Serialize)]
+struct OpenedTab {
+    tab: Tab,
+    contents: String,
+    already_open: bool,
+}
+
+/// Open a file in a new tab — or switch to the existing tab if that path is
+/// already open. The frontend uses `already_open` to decide whether to trust
+/// its cached editor buffer (e.g. after the user edited but didn't save) or
+/// replace it with the on-disk contents.
+#[tauri::command]
+fn open_tab(
     path: String,
     state: State<Mutex<AppState>>,
     app: AppHandle,
-) -> Result<String> {
+) -> Result<OpenedTab> {
     let contents = std::fs::read_to_string(&path)?;
     let mut s = lock(&state)?;
-    s.remember(path.clone());
+    if let Some(idx) = s.find_path_index(&path) {
+        s.active = Some(idx);
+        let tab = s.tabs[idx].clone();
+        s.push_recent(PathBuf::from(&path));
+        persist_recent(&app, &s.recent);
+        return Ok(OpenedTab { tab, contents, already_open: true });
+    }
+    let id = s.bump_id();
+    let tab = Tab { id, path: Some(path.clone()), dirty: false };
+    s.tabs.push(tab.clone());
+    s.active = Some(s.tabs.len() - 1);
     s.push_recent(PathBuf::from(path));
     persist_recent(&app, &s.recent);
-    Ok(contents)
+    Ok(OpenedTab { tab, contents, already_open: false })
+}
+
+/// Close a tab by id. Adjusts `active` so it keeps pointing at a valid tab
+/// (or becomes `None` if every tab is now closed). Returns the remaining tab
+/// list so the frontend can re-render without a separate round-trip.
+#[tauri::command]
+fn close_tab(id: u64, state: State<Mutex<AppState>>) -> Result<Vec<Tab>> {
+    let mut s = lock(&state)?;
+    let Some(idx) = s.find_index(id) else {
+        return Ok(s.tabs.clone());
+    };
+    s.tabs.remove(idx);
+    s.active = match s.active {
+        None => None,
+        Some(a) if s.tabs.is_empty() => {
+            let _ = a;
+            None
+        }
+        Some(a) if a == idx => Some(a.min(s.tabs.len() - 1)),
+        Some(a) if a > idx => Some(a - 1),
+        other => other,
+    };
+    Ok(s.tabs.clone())
+}
+
+#[tauri::command]
+fn switch_tab(id: u64, state: State<Mutex<AppState>>) -> Result<()> {
+    let mut s = lock(&state)?;
+    if let Some(idx) = s.find_index(id) {
+        s.active = Some(idx);
+        Ok(())
+    } else {
+        Err(FeditError::NoTab)
+    }
+}
+
+#[tauri::command]
+fn list_tabs(state: State<Mutex<AppState>>) -> Result<Vec<Tab>> {
+    let s = lock(&state)?;
+    Ok(s.tabs.clone())
+}
+
+#[tauri::command]
+fn active_tab(state: State<Mutex<AppState>>) -> Result<Option<Tab>> {
+    let s = lock(&state)?;
+    Ok(s.active.map(|i| s.tabs[i].clone()))
+}
+
+#[tauri::command]
+fn set_tab_dirty(
+    id: u64,
+    dirty: bool,
+    state: State<Mutex<AppState>>,
+) -> Result<()> {
+    let mut s = lock(&state)?;
+    match s.tabs.iter_mut().find(|t| t.id == id) {
+        Some(t) => {
+            t.dirty = dirty;
+            Ok(())
+        }
+        None => Err(FeditError::NoTab),
+    }
+}
+
+/// True if any tab has unsaved changes — the close-window handler uses this
+/// to decide whether to block the close.
+#[tauri::command]
+fn any_dirty(state: State<Mutex<AppState>>) -> Result<bool> {
+    let s = lock(&state)?;
+    Ok(s.tabs.iter().any(|t| t.dirty))
+}
+
+/// Set the force-close flag and ask the window to close again. The window-event
+/// handler sees the flag and lets the close through this time. Used by the
+/// frontend after the user confirms "discard unsaved changes".
+#[tauri::command]
+fn force_close_window(
+    state: State<Mutex<AppState>>,
+    window: tauri::Window,
+) -> Result<()> {
+    {
+        let mut s = lock(&state)?;
+        s.force_close = true;
+    }
+    let _ = window.close();
+    Ok(())
 }
 
 #[tauri::command]
 fn save(
+    id: u64,
     new_path: Option<String>,
     contents: String,
     state: State<Mutex<AppState>>,
     app: AppHandle,
 ) -> Result<String> {
     let mut s = lock(&state)?;
+    let idx = s.find_index(id).ok_or(FeditError::NoTab)?;
     let path = match new_path {
         Some(p) => p,
-        None => match &s.current_path {
+        None => match &s.tabs[idx].path {
             Some(p) => p.clone(),
             None => return Err(FeditError::NoPath),
         },
     };
     std::fs::write(&path, &contents)?;
-    s.remember(path.clone());
+    s.tabs[idx].path = Some(path.clone());
+    s.tabs[idx].dirty = false;
     s.push_recent(PathBuf::from(&path));
     persist_recent(&app, &s.recent);
     Ok(path)
-}
-
-#[tauri::command]
-fn current_path(state: State<Mutex<AppState>>) -> Result<Option<String>> {
-    let s = lock(&state)?;
-    Ok(s.current_path.clone())
-}
-
-#[tauri::command]
-fn set_dirty(dirty: bool, state: State<Mutex<AppState>>) -> Result<()> {
-    let mut s = lock(&state)?;
-    s.set_dirty(dirty);
-    Ok(())
-}
-
-#[tauri::command]
-fn is_dirty(state: State<Mutex<AppState>>) -> Result<bool> {
-    let s = lock(&state)?;
-    Ok(s.is_dirty)
 }
 
 #[tauri::command]
@@ -257,6 +386,10 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .id("save-as")
         .accelerator("CmdOrCtrl+Shift+S")
         .build(app)?;
+    let close_tab_item = MenuItemBuilder::new("Close Tab")
+        .id("close-tab")
+        .accelerator("CmdOrCtrl+W")
+        .build(app)?;
 
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_item)
@@ -264,6 +397,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
         .item(&open_item)
         .item(&save_item)
         .item(&save_as_item)
+        .separator()
+        .item(&close_tab_item)
         .separator()
         .item(&PredefinedMenuItem::quit(app, None)?)
         .build()?;
@@ -290,11 +425,16 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             echo,
-            read_file,
+            new_tab,
+            open_tab,
+            close_tab,
+            switch_tab,
+            list_tabs,
+            active_tab,
+            set_tab_dirty,
+            any_dirty,
+            force_close_window,
             save,
-            current_path,
-            set_dirty,
-            is_dirty,
             recent_files,
             find_matches,
             replace_matches,
@@ -323,8 +463,20 @@ pub fn run() {
             window.on_window_event(move |event| {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     let state: State<Mutex<AppState>> = handle.state();
-                    let dirty = state.lock().map(|s| s.is_dirty).unwrap_or(false);
-                    if dirty {
+                    // Two flags guard this branch: `force_close` means the
+                    // frontend already confirmed a discard, so let the close
+                    // through and clear the flag. Otherwise, prevent the close
+                    // if any tab is dirty and ask the frontend to show a
+                    // confirm dialog.
+                    let (force, dirty) = state
+                        .lock()
+                        .map(|mut s| {
+                            let force = s.force_close;
+                            if force { s.force_close = false; }
+                            (force, s.tabs.iter().any(|t| t.dirty))
+                        })
+                        .unwrap_or((false, false));
+                    if !force && dirty {
                         api.prevent_close();
                         let _ = window_for_emit.emit("fedit:close-blocked", ());
                     }

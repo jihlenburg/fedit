@@ -290,6 +290,95 @@ button.ghost:hover {
 }
 
 /* ---------------------------------------------------------------------------
+ * 6a. Tab strip (ch23)
+ *
+ * One chip per open file + a "+" to create a new one. The active chip sits
+ * visually on top of the editor-wrap; inactive chips fade into the page
+ * background. overflow-x:auto means a ridiculous number of tabs scroll
+ * horizontally rather than reflowing the whole layout.
+ * -------------------------------------------------------------------------*/
+.tab-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: var(--space-3);
+  padding: 0 var(--space-1);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-soft);
+  color: var(--text-muted);
+  border: 1px solid var(--border-soft);
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-size: var(--fs-small);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 18rem;
+  transition: background var(--transition), color var(--transition);
+}
+
+.tab:hover { background: var(--bg-raised); color: var(--text); }
+
+.tab.active {
+  background: var(--bg-raised);
+  color: var(--text);
+  font-weight: 500;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  z-index: 1;
+  /* Sit flush with the editor below */
+  margin-bottom: -1px;
+  border-bottom: 1px solid var(--bg-raised);
+}
+
+.tab .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14rem;
+}
+
+.tab .tab-dirty {
+  color: var(--accent);
+  font-size: 0.8em;
+}
+
+.tab .close {
+  background: none;
+  border: none;
+  padding: 0 var(--space-1);
+  color: inherit;
+  font-size: 0.9em;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  border-radius: var(--radius-sm);
+}
+.tab .close:hover { opacity: 1; background: var(--border-soft); }
+
+.tab-new {
+  border-style: dashed;
+  background: transparent;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: var(--space-2) var(--space-4);
+}
+.tab-new:hover { background: var(--bg-soft); color: var(--accent); }
+
+/* Soften the editor-wrap's top corners so it tucks under the active tab. */
+.tab-bar + .editor-wrap {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: var(--radius);
+}
+
+/* ---------------------------------------------------------------------------
  * 6b. Find / replace bar
  *
  * Sits above the editor when open. Visibility is toggled by the `hidden`

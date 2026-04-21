@@ -59,6 +59,10 @@
         <span id="path-text"></span>
       </p>
 
+      <!-- Tab strip: one chip per open file + a new-tab button.
+           Rendered from list_tabs(); JS owns per-tab editor-buffer state. -->
+      <div class="tab-bar" id="tab-bar" role="tablist" aria-label="open files"></div>
+
       <div class="editor-wrap">
         <div class="gutter" id="gutter" aria-hidden="true"></div>
         <textarea

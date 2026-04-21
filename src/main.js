@@ -1,5 +1,5 @@
 const { invoke } = window.__TAURI__.core;
-const { open, save: saveDialog } = window.__TAURI__.dialog;
+const { open, save: saveDialog, ask } = window.__TAURI__.dialog;
 const { listen } = window.__TAURI__.event;
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -21,43 +21,166 @@ window.addEventListener("DOMContentLoaded", () => {
   const dirtyDot = document.querySelector("#dirty-dot");
   const editor = document.querySelector("#editor");
   const gutter = document.querySelector("#gutter");
-  let localDirty = false;
+  const tabBar = document.querySelector("#tab-bar");
+
+  // --------------------------------------------------------------------------
+  // Tab state (ch23)
+  //
+  // Rust owns the tab list (ids, paths, dirty flags). JS owns the editor
+  // CONTENTS for each tab — the textarea can only show one buffer at a time,
+  // so we cache the others in `buffers` keyed by tab id. Switching a tab =
+  // stash editor.value into the outgoing tab, load editor.value from the
+  // incoming tab.
+  // --------------------------------------------------------------------------
+  const buffers = new Map(); // id -> string
+  let activeId = null;
 
   // Render line numbers into the gutter, one per line in the textarea.
-  // `split("\n").length` is how many lines exist — even an empty buffer is "1".
   function renderGutter() {
     const lineCount = editor.value.length === 0 ? 1 : editor.value.split("\n").length;
     const nums = new Array(lineCount);
     for (let i = 0; i < lineCount; i++) nums[i] = i + 1;
     gutter.textContent = nums.join("\n");
   }
-
-  // Keep the gutter's scroll pinned to the textarea's scroll position.
-  // overflow:hidden on .gutter means it never shows a scrollbar — we drive it.
   function syncGutterScroll() {
     gutter.scrollTop = editor.scrollTop;
   }
 
-  async function refreshPath() {
-    const path = await invoke("current_path");
-    pathText.textContent = path ?? "";
-    return path;
+  function shortName(path) {
+    if (!path) return "untitled";
+    const bits = path.split(/[\\/]/);
+    return bits[bits.length - 1] || path;
   }
 
-  function setDirty(next) {
-    localDirty = next;
-    dirtyDot.hidden = !next;
-    return invoke("set_dirty", { dirty: next });
+  function renderTabs(tabs) {
+    tabBar.replaceChildren();
+    for (const t of tabs) {
+      const chip = document.createElement("div");
+      chip.className = "tab" + (t.id === activeId ? " active" : "");
+      chip.setAttribute("role", "tab");
+      chip.setAttribute("aria-selected", t.id === activeId ? "true" : "false");
+      chip.dataset.id = t.id;
+
+      if (t.dirty) {
+        const dot = document.createElement("span");
+        dot.className = "tab-dirty";
+        dot.textContent = "●";
+        dot.setAttribute("aria-label", "unsaved");
+        chip.appendChild(dot);
+      }
+
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = shortName(t.path);
+      name.title = t.path ?? "untitled";
+      chip.appendChild(name);
+
+      const close = document.createElement("button");
+      close.className = "close";
+      close.type = "button";
+      close.textContent = "✕";
+      close.setAttribute("aria-label", `close ${shortName(t.path)}`);
+      close.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeTab(t.id, t.dirty);
+      });
+      chip.appendChild(close);
+
+      chip.addEventListener("click", () => {
+        if (t.id !== activeId) switchToTab(t.id);
+      });
+
+      tabBar.appendChild(chip);
+    }
+
+    const plus = document.createElement("button");
+    plus.className = "tab tab-new";
+    plus.type = "button";
+    plus.textContent = "+";
+    plus.setAttribute("aria-label", "new tab");
+    plus.addEventListener("click", () => createNewTab());
+    tabBar.appendChild(plus);
+  }
+
+  async function refreshTabs() {
+    const tabs = await invoke("list_tabs");
+    renderTabs(tabs);
+    return tabs;
+  }
+
+  function setPathLine(tab) {
+    pathText.textContent = tab?.path ?? (tab ? "untitled" : "");
+    dirtyDot.hidden = !(tab && tab.dirty);
+  }
+
+  // Stash the current textarea contents into the outgoing tab's buffer.
+  function stashActive() {
+    if (activeId !== null) buffers.set(activeId, editor.value);
+  }
+
+  // Load the given tab into the textarea.
+  async function loadTab(tab) {
+    activeId = tab.id;
+    editor.value = buffers.get(tab.id) ?? "";
+    renderGutter();
+    setPathLine(tab);
+  }
+
+  async function createNewTab() {
+    stashActive();
+    const tab = await invoke("new_tab");
+    buffers.set(tab.id, "");
+    await loadTab(tab);
+    await refreshTabs();
+    editor.focus();
+  }
+
+  async function switchToTab(id) {
+    stashActive();
+    await invoke("switch_tab", { id });
+    const tab = await invoke("active_tab");
+    if (tab) await loadTab(tab);
+    await refreshTabs();
+  }
+
+  async function closeTab(id, dirty) {
+    if (dirty) {
+      // Tauri 2 WebViews don't expose window.confirm — use the dialog plugin's
+      // `ask`, which renders a native OS dialog and returns a boolean promise.
+      const confirmed = await ask("This tab has unsaved changes. Close anyway?", {
+        title: "fedit",
+        kind: "warning",
+      });
+      if (!confirmed) return;
+    }
+    stashActive();
+    const tabs = await invoke("close_tab", { id });
+    buffers.delete(id);
+    if (tabs.length === 0) {
+      // Always keep at least one tab so the editor has somewhere to live.
+      const fresh = await invoke("new_tab");
+      buffers.set(fresh.id, "");
+      await loadTab(fresh);
+      await refreshTabs();
+      return;
+    }
+    // Backend already adjusted `active`; read it back.
+    const active = await invoke("active_tab");
+    if (active) await loadTab(active);
+    await refreshTabs();
   }
 
   async function doSave(newPath) {
+    if (activeId === null) return null;
     try {
       const saved = await invoke("save", {
+        id: activeId,
         newPath: newPath ?? null,
         contents: editor.value,
       });
-      await setDirty(false);
       pathText.textContent = `${saved} — saved`;
+      dirtyDot.hidden = true;
+      await refreshTabs();
       return saved;
     } catch (err) {
       if (err && err.kind === "NoPath") {
@@ -77,40 +200,51 @@ window.addEventListener("DOMContentLoaded", () => {
       ...paths.map((p) => {
         const li = document.createElement("li");
         li.textContent = p;
-        li.addEventListener("click", async () => {
-          try {
-            editor.value = await invoke("read_file", { path: p });
-            renderGutter();
-            await refreshPath();
-            await setDirty(false);
-            await refreshRecent();
-          } catch (err) {
-            pathText.textContent = `${p} — error: ${err?.message ?? err}`;
-          }
-        });
+        li.addEventListener("click", () => openPath(p));
         return li;
       }),
     );
   }
 
-  refreshPath();
-  refreshRecent();
-  renderGutter();
-
-  document.querySelector("#open-btn").addEventListener("click", async () => {
-    const path = await open({ multiple: false, directory: false });
-    if (path === null) {
-      return;
-    }
+  async function openPath(path) {
+    stashActive();
     try {
-      editor.value = await invoke("read_file", { path });
-      renderGutter();
-      await refreshPath();
-      await setDirty(false);
+      const opened = await invoke("open_tab", { path });
+      // If we switched to an existing tab that has an in-memory buffer, prefer
+      // the cached version (user may have unsaved edits). Otherwise seed the
+      // buffer with on-disk contents.
+      if (!opened.already_open || !buffers.has(opened.tab.id)) {
+        buffers.set(opened.tab.id, opened.contents);
+      }
+      await loadTab(opened.tab);
+      await refreshTabs();
       await refreshRecent();
     } catch (err) {
       pathText.textContent = `${path} — error: ${err?.message ?? err}`;
     }
+  }
+
+  // Boot: make sure there's always at least one tab on first paint.
+  async function boot() {
+    const tabs = await invoke("list_tabs");
+    if (tabs.length === 0) {
+      const tab = await invoke("new_tab");
+      buffers.set(tab.id, "");
+      await loadTab(tab);
+    } else {
+      const active = await invoke("active_tab");
+      for (const t of tabs) if (!buffers.has(t.id)) buffers.set(t.id, "");
+      if (active) await loadTab(active);
+    }
+    await refreshTabs();
+    await refreshRecent();
+  }
+  boot();
+
+  document.querySelector("#open-btn").addEventListener("click", async () => {
+    const path = await open({ multiple: false, directory: false });
+    if (path === null) return;
+    await openPath(path);
   });
 
   document.querySelector("#save-btn").addEventListener("click", async () => {
@@ -125,38 +259,47 @@ window.addEventListener("DOMContentLoaded", () => {
     await refreshRecent();
   });
 
-  editor.addEventListener("input", () => {
-    if (!localDirty) {
-      setDirty(true);
+  editor.addEventListener("input", async () => {
+    if (activeId === null) return;
+    buffers.set(activeId, editor.value);
+    // Mark the active tab dirty in Rust, then refresh the tab strip so the
+    // dirty dot shows up. This is one IPC per keystroke transition — cheap
+    // because we guard with a local "was already dirty?" check.
+    if (dirtyDot.hidden) {
+      dirtyDot.hidden = false;
+      await invoke("set_tab_dirty", { id: activeId, dirty: true });
+      await refreshTabs();
     }
     renderGutter();
   });
   editor.addEventListener("scroll", syncGutterScroll);
 
-  listen("fedit:close-blocked", () => {
-    pathText.textContent = "unsaved changes — save before closing";
+  // When the window's close button is hit and any tab is dirty, the Rust
+  // handler prevents the close and fires this event. Ask the user; if they
+  // confirm, call back into Rust to flip the force-close flag and re-close.
+  listen("fedit:close-blocked", async () => {
+    const confirmed = await ask("One or more tabs have unsaved changes. Close anyway?", {
+      title: "fedit",
+      kind: "warning",
+    });
+    if (confirmed) {
+      await invoke("force_close_window");
+    }
   });
 
-  async function newFile() {
-    editor.value = "";
-    pathText.textContent = "";
-    renderGutter();
-    await setDirty(false);
-  }
-
-  listen("fedit:menu-new", newFile);
+  listen("fedit:menu-new", () => createNewTab());
   listen("fedit:menu-open", () => document.querySelector("#open-btn").click());
   listen("fedit:menu-save", () => document.querySelector("#save-btn").click());
   listen("fedit:menu-save-as", () => document.querySelector("#save-as-btn").click());
+  listen("fedit:menu-close-tab", async () => {
+    if (activeId === null) return;
+    const tabs = await invoke("list_tabs");
+    const t = tabs.find((t) => t.id === activeId);
+    if (t) closeTab(t.id, t.dirty);
+  });
 
   // --------------------------------------------------------------------------
   // Find / replace bar (ch22)
-  //
-  // The Rust side owns the search — it compiles the regex and returns every
-  // match as a (start, end) byte range. JS turns those ranges into a textarea
-  // selection via setSelectionRange. Keeping the regex compile in Rust means
-  // we get one correct error message and no regex engine divergence between
-  // browsers.
   // --------------------------------------------------------------------------
   const findBar      = document.querySelector("#find-bar");
   const findInput    = document.querySelector("#find-input");
@@ -216,9 +359,6 @@ window.addEventListener("DOMContentLoaded", () => {
     const m = matches[index];
     editor.focus();
     editor.setSelectionRange(m.start, m.end);
-    // Nudge the textarea to scroll the selection into view by temporarily
-    // replacing the value with the same thing — blurring+refocusing is the
-    // widely-used trick but sets dirty; instead we use scrollTop heuristic.
     const approxLine = editor.value.slice(0, m.start).split("\n").length;
     const lineHeight = parseFloat(getComputedStyle(editor).lineHeight) || 20;
     editor.scrollTop = Math.max(0, approxLine * lineHeight - editor.clientHeight / 2);
@@ -246,8 +386,13 @@ window.addEventListener("DOMContentLoaded", () => {
       });
       if (newText !== editor.value) {
         editor.value = newText;
+        buffers.set(activeId, newText);
         renderGutter();
-        await setDirty(true);
+        if (dirtyDot.hidden) {
+          dirtyDot.hidden = false;
+          await invoke("set_tab_dirty", { id: activeId, dirty: true });
+          await refreshTabs();
+        }
       }
       await runFind();
     } catch (err) {
