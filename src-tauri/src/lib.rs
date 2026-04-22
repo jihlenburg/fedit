@@ -436,7 +436,7 @@ fn fuzzy_commands(query: String) -> Vec<(Command, i32)> {
             fuzzy_score(&haystack, &q).map(|s| (c, s))
         })
         .collect();
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
     scored
 }
 
